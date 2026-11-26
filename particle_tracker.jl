@@ -13,8 +13,10 @@ using NCDatasets
 using CSV
 using DataFrames
 using Interpolations
+using Base.Threads
 
-
+# print number of threads
+print("Threads: ", Threads.nthreads(), "\n")
 
 include("tin_interpolation.jl")
 
@@ -23,7 +25,7 @@ fn = "/Volumes/Extreme SSD/Laura/run03_surface_velocity.nc"
 wind_fn = "/Volumes/Extreme SSD/Laura/Wind_Hansweert_2020.txt"
 
 dt = 5*60
-beta = 0.1
+beta = 0.01
 
 # -------------------------------------------------------------------------------------------------- #
 # Load data and set attributes
@@ -41,7 +43,7 @@ xy = hcat(ds["xcoor"][:], ds["ycoor"][:])
 npoin = ds.dim["npoin"]
 
 # get total time
-ttime = ds["time"][end]
+ttime = ds["time"][end] - ds["time"][1]
 println("Total time: $(ttime/3600) hours ")
 
 # get time step
@@ -60,6 +62,9 @@ end
 
 steps = Int(floor(ttime // dt))
 
+if dt % ncdt != 0
+    error("timestep of the netcdf file is not a multiple of the desired dispersal dt")
+end
 # -------------------------------------------------------------------------------------------------- #
 # Load wind data
 # -------------------------------------------------------------------------------------------------- #
@@ -110,8 +115,6 @@ for i in 1:steps
     ys[i,i] = poi_y
 end
 
-global floating = fill(false, size(xs, 1))
-
 # -------------------------------------------------------------------------------------------------- #
 # The loop locations
 # -------------------------------------------------------------------------------------------------- #
@@ -122,33 +125,37 @@ velocities = zeros(Float32, size(ds["VELOCITY U"], 1), 2)
 
 # !!! check whether NN faster is with nearest neighbor search or with barycentric coordinates
 
-for i in ProgressBar(2:steps)
+for t in ProgressBar(2:steps)
 
             # get the seconds since the start of the simulation (1 september 00:00)
-            wind_t = dt*(i-1)
+            wind_t = dt*(t-1)
+
+            # float to integer
+            nct = floor(Int, (t-1)*dt/ncdt)
 
             # get the velocities at the current time step
-            velocities[:, 1] .= ds["VELOCITY U"][:, i-1]
-            velocities[:, 2] .= ds["VELOCITY V"][:, i-1]
+            velocities[:, 1] .= ds["VELOCITY U"][:, nct]
+            velocities[:, 2] .= ds["VELOCITY V"][:, nct]
 
             # get the particle locations at the previous time step
-            xysi[:, 1] .= xs[:, i-1]
-            xysi[:, 2] .= ys[:, i-1]
+            xysi[:, 1] .= xs[:, t-1]
+            xysi[:, 2] .= ys[:, t-1]
 
             # compute interpolated velocities at the particle locations
             vi = tin_interpolator(xysi,
             xy, connectivity, velocities,
             vertex_to_triangles)
 
-            na_mask = isnan.(xs[:, i]) .|| isnan.(ys[:, i])
+            # only update Nans (numbers indicate newly released particles)
+            na_mask = isnan.(xs[:, t]) .|| isnan.(ys[:, t])
 
-            # get wind vector
-            uw = wind.u[i]
-            vw = wind.v[i]
+            # get relative wind vector
+            uw = wind.u[t] .- vi[na_mask,1]
+            vw = wind.v[t] .- vi[na_mask,2]
 
             # update positions
-            xs[na_mask,i] = xs[na_mask,i-1] .+ vi[na_mask,1] * dt .+ uw * dt * beta
-            ys[na_mask,i] = ys[na_mask,i-1] .+ vi[na_mask,2] * dt .+ vw * dt * beta
+            xs[na_mask,t] = xs[na_mask,t-1] .+ vi[na_mask,1] * dt .+ uw * dt * beta
+            ys[na_mask,t] = ys[na_mask,t-1] .+ vi[na_mask,2] * dt .+ vw * dt * beta
 
 end
 
@@ -156,18 +163,51 @@ end
 # Release locations
 # -------------------------------------------------------------------------------------------------- #
 
-fig = Figure(figsize=(10, 7))
+fig = Figure(figsize=(25, 15))
 ax1 = Axis(fig[1, 1], xlabel="x [m]", ylabel="y [m]")
 mesh!(ax1, xy, connectivity, color = :gray, transparency=true, alpha=0.2)
 
 for i in 1:size(xs, 1)
-    lines!(ax1, xs[i,:], ys[i,:], color = :black, alpha = .05)
+    x_path = xs[i, :]
+    x_path = x_path[.!isnan.(x_path)]
+    y_path = ys[i, :]
+    y_path = y_path[.!isnan.(y_path)]
+    lines!(ax1, x_path, y_path, color = :black, alpha = .05)
+    scatter!(ax1, x_path[1], y_path[1], color = :green, markersize=5, alpha = .25)
+    scatter!(ax1, x_path[end], y_path[end], color = :red, markersize=5, alpha = .25)
 end
-scatter!(ax1, xs[:,begin], ys[:,begin], color = :green, markersize=25, alpha = 1.)
-scatter!(ax1, xs[:,end], ys[:,end], color = :red, markersize=5, alpha = 1.)
+
 
 xlims!(10000,100000)
 ylims!(330000, 400000)
 
 display(fig)
 save("trajectories.png", fig)  # Save as PNG
+
+
+
+#=
+# Compute wind direction and magnitude
+wind_direction = atan.(-1*wind.v, -1*wind.u) # Angle in radians
+wind_magnitude = sqrt.(wind.u.^2 .+ wind.v.^2)
+
+# Bin wind directions into 16 compass directions (optional)
+num_bins = 16
+bin_edges = range(-π, π; length=num_bins+1)
+bin_counts = zeros(Float64, num_bins)
+
+for dir in wind_direction
+    bin_idx = findfirst(x -> dir < x, bin_edges)
+    if bin_idx !== nothing
+        bin_counts[bin_idx - 1] += 1  # Subtract 1 because `bin_edges` is 1-based
+    end
+end
+
+
+# Add wind rose to the figure
+fig_wind = Figure(figsize=(3, 3))
+polar_ax = PolarAxis(fig_wind[1,1])
+barplot!(polar_ax, bin_edges[1:end-1] .+ diff(bin_edges)/2, bin_counts; color=:blue, alpha=0.7, linewidth=0)
+#display(fig_wind)
+
+=#

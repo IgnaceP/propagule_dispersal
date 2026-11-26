@@ -34,13 +34,15 @@ function tin_interpolator(pois::Matrix,
     # initialize vector to store interpolated values
     pois_values = fill(Float32(NaN), size(pois)[1], size(triangle_values)[2])
 
-    Threads.@threads for poi_i in 1:size(pois)[1]
+    poi_i_nonnan = collect(1:size(pois,1))[collect(vec(all(!isnan, pois, dims=2)))]
+
+    Threads.@threads for poi_i in poi_i_nonnan
     #for poi_i in 1:size(pois)[1]
 
         # get the point of interest
         poi = @view pois[poi_i,:]
 
-        if isnan(poi[1]) || isnan(poi[2])
+        if isnan(poi[1]) .|| isnan(poi[2])
             continue
         end
 
