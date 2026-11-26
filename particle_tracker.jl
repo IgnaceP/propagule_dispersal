@@ -163,8 +163,8 @@ end
 # Release locations
 # -------------------------------------------------------------------------------------------------- #
 
-fig = Figure(figsize=(25, 15))
-ax1 = Axis(fig[1, 1], xlabel="x [m]", ylabel="y [m]")
+fig = Figure(size=(1200,800))
+ax1 = Axis(fig[1:4, 1:4], xlabel="x [m]", ylabel="y [m]")
 mesh!(ax1, xy, connectivity, color = :gray, transparency=true, alpha=0.2)
 
 for i in 1:size(xs, 1)
@@ -181,13 +181,8 @@ end
 xlims!(10000,100000)
 ylims!(330000, 400000)
 
-display(fig)
-save("trajectories.png", fig)  # Save as PNG
-
-
-
-#=
 # Compute wind direction and magnitude
+wind = wind[wind.T .< steps*dt, :]
 wind_direction = atan.(-1*wind.v, -1*wind.u) # Angle in radians
 wind_magnitude = sqrt.(wind.u.^2 .+ wind.v.^2)
 
@@ -205,9 +200,9 @@ end
 
 
 # Add wind rose to the figure
-fig_wind = Figure(figsize=(3, 3))
-polar_ax = PolarAxis(fig_wind[1,1])
-barplot!(polar_ax, bin_edges[1:end-1] .+ diff(bin_edges)/2, bin_counts; color=:blue, alpha=0.7, linewidth=0)
-#display(fig_wind)
+polar_ax = PolarAxis(fig[1,5]; rticklabelsize=0, thetaticklabelsize=10)
+barplot!(polar_ax, bin_edges[1:end-1] .+ diff(bin_edges)/2, bin_counts; color=:orange, alpha=0.7, linewidth=0)
 
-=#
+
+display(fig)
+save("trajectories.png", fig)  # Save as PNG
